@@ -37,15 +37,15 @@ void calculateMortgage(MortgageType mortgageType)
     /* INPUT DATA */
     
     // basic parameters
-    double totalMortgageAmount = 255500;    // the total loaned amount €
+    double totalMortgageAmount = 240000;    // the total loaned amount €
     int mortgagePeriodYears = 30;           // the mortgage's repayment period (in years)
-    double nominalInterestRate = 0.0279;    // the mortgage's nominal interest rate (eg. 0.029 = 2.9%) (assumed fixed for the entire period)
-    double WOZValueOfProperty = 255000;     // the WOZ value of the property (in €)
-    double annualAmortization = 0;      // the amount (in €) that is planned to be amortized once per year
-    double mortgageArrangementFee = 3125;   // the total amount paid as arrangement fees
+    double nominalInterestRate = 0.0234;    // the mortgage's nominal interest rate (eg. 0.029 = 2.9%) (assumed fixed for the entire period)
+    double annualAmortization = 20000;          // the amount (in €) that is planned to be amortized once per year
+    double mortgageArrangementFee = 1250;   // the total amount paid as arrangement fees
     
     // dutch mortgage tax relief
-    double maxDeductionRateCurrentYear = 0.51; // 51% in 2015, decreasing 0.5% per year until 2038, when it has reached 38%
+    double WOZValueOfProperty = 255000;     // the WOZ value of the property (in €)
+    double maxDeductionRateCurrentYear = 0.505; // 51% in 2015, decreasing 0.5% per year until 2038, when it has reached 38%
     double incomeTaxBracket = 0.52;          // the highest taxation bracket applied to your salary (eg: 0.52 = 52%)
     
     /**************/
@@ -174,11 +174,12 @@ void calculateMortgage(MortgageType mortgageType)
 
     NSLog(@"Total net amount paid: €%.0f", totalNetPaid);
     NSLog(@"Total net interest paid: €%.0f", totalNetInterestPaid);
-    NSLog(@"Total tax benefits: €%.0f", totalInterestPaid - totalNetInterestPaid);
+    NSLog(@"Final interest to loan ratio: %.0f%%", totalNetInterestPaid * 100/totalMortgageAmount);
+    //NSLog(@"Total tax benefits: €%.0f", totalInterestPaid - totalNetInterestPaid);
     
     
     // calculate the effective interest rate
-    // It is slightly higher than the borrowing rate because it takes into account that you pay your mortgage every month afterwards.
+    // It is slightly higher than the borrowing rate because it takes into account that you pay your mortgage every month in arrears.
     //    r_eff = (1+r/n)^n-1
     //    r -> nominal interest rate
     //    n -> compounding periods
