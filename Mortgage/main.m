@@ -31,6 +31,11 @@ int main(int argc, const char * argv[]) {
     return 0;
 }
 
+/* Some custom options for adjustments that can be made during the lifetime of the loan */
+
+#define EXPIRING_30_PERCENT_RULING          1
+#define ADJUST_LOAN_RISKCLASS               1
+#define ADJUST_PRINCIPAL_REPAYMENT_YEARLY   0
 
 void calculateMortgage(MortgageType mortgageType)
 {
@@ -40,13 +45,14 @@ void calculateMortgage(MortgageType mortgageType)
     double totalMortgageAmount = 240000;    // the total loaned amount €
     int mortgagePeriodYears = 30;           // the mortgage's repayment period (in years)
     double nominalInterestRate = 0.0234;    // the mortgage's nominal interest rate (eg. 0.029 = 2.9%) (assumed fixed for the entire period)
-    double annualAmortization = 20000;          // the amount (in €) that is planned to be amortized once per year
+    double annualRepayment = 20000;         // an extra amount (in €) that is planned to be repaid once per year, every year, on the last month
     double mortgageArrangementFee = 1250;   // the total amount paid as arrangement fees
     
     // dutch mortgage tax relief
     double WOZValueOfProperty = 255000;     // the WOZ value of the property (in €)
     double maxDeductionRateCurrentYear = 0.505; // 51% in 2015, decreasing 0.5% per year until 2038, when it has reached 38%
     double incomeTaxBracket = 0.52;          // the highest taxation bracket applied to your salary (eg: 0.52 = 52%)
+    int initialYear = 2016;
     
     /**************/
     
@@ -75,7 +81,7 @@ void calculateMortgage(MortgageType mortgageType)
     NSLog(@"> Mortgage details: €%.0f at %.2f%% during %lu years", totalMortgageAmount, nominalInterestRate*100, (unsigned long)mortgagePeriodYears);
     NSLog(@"> WOZ value: €%.0f", WOZValueOfProperty);
     NSLog(@"> Eigenwoningforfait: €%.2f/month", monthlyEWF);
-    NSLog(@"> Annual amortization: €%.0f", annualAmortization);
+    NSLog(@"> Additional annual repayment: €%.0f", annualRepayment);
     
     double totalPaid = 0;
     double totalInterestPaid = 0;
@@ -84,13 +90,13 @@ void calculateMortgage(MortgageType mortgageType)
     int totalPeriodMonths = 0;
     BOOL stillInDebt = YES;
     
-    for (int year = 1; year <= mortgagePeriodYears && stillInDebt; year++)
+    for (int year = initialYear; year <= initialYear + mortgagePeriodYears && stillInDebt; year++)
     {
-        NSLog(@"*********** Year %d - Remaining debt: €%.0f ***********", year, remainingDebt);
+        NSLog(@"\n*********** Year %d (#%d) - Remaining debt: €%.0f ***********", year, 1 + totalPeriodMonths / 12, remainingDebt);
         
-#if 1
-        /* custom code to deal with the 30% ruling expiring after 3 years, after which the income tax bracket becomes 52% instead of 42% */
-        if (year <= 3)
+#if EXPIRING_30_PERCENT_RULING
+        /* custom code to deal with the 30% ruling expiring in 2018, after which the income tax bracket becomes 52% instead of 42% */
+        if (year <= 2018)
         {
             incomeTaxBracket = 0.42;
         }
@@ -99,14 +105,41 @@ void calculateMortgage(MortgageType mortgageType)
             incomeTaxBracket = 0.52;
         }
 #endif
+        
+#if ADJUST_LOAN_RISKCLASS
+        /* adjust the loan's risk class from initial 85% to 65% on the third year, thanks to downpayments and revalorization of the property */
+        if (year >= 2018)
+        {
+            nominalInterestRate = 0.0187; // Hypotrust Comfort (standaard), 10 years, t/m 65%, 1.87% as of dec 2017
+            monthlyInterestRate = nominalInterestRate / 12;
+        }
+#endif
         double taxDeductionRate = MIN(maxDeductionRateCurrentYear, incomeTaxBracket);
+        double totalInterestPaidThisYear = 0;
+        double totalNetInterestPaidThisYear = 0;
+        double principalAmmortizedThisYear = 0;
         
         for (int month = 1; month <= 12 && stillInDebt; month++)
         {
             if (remainingDebt <= 1)
             {
                 stillInDebt = NO;
-                break;
+                continue;
+            }
+            
+            // can we finish off the loan now with one single payment? then do so in order to avoid paying interest over the remaining months
+            if (annualRepayment > 0 && remainingDebt <= annualRepayment)
+            {
+                double amountAmortized = MIN(annualRepayment, remainingDebt);
+                
+                NSLog(@" + final repayment: €%.0f", amountAmortized);
+                remainingDebt -= amountAmortized;
+                totalPaid += amountAmortized;
+                totalNetPaid += amountAmortized;
+                principalAmmortizedThisYear += amountAmortized;
+                
+                stillInDebt = NO;
+                continue;
             }
             
             double interestPaidThisMonth = monthlyInterestRate * remainingDebt;
@@ -132,7 +165,7 @@ void calculateMortgage(MortgageType mortgageType)
             // tax deduction over mortgage interest paid (up to 30 years max)
             double taxBenefitsThisMonth = 0;
             
-            if (interestPaidThisMonth > additionalTaxableIncome && year <= 30)
+            if (interestPaidThisMonth > additionalTaxableIncome && year <=  initialYear + 30)
             {
                 taxBenefitsThisMonth = (interestPaidThisMonth - monthlyEWF) * taxDeductionRate;
             }
@@ -144,23 +177,41 @@ void calculateMortgage(MortgageType mortgageType)
             
             totalPaid += grossMortgagePremiumThisMonth;
             totalInterestPaid += interestPaidThisMonth;
+            totalInterestPaidThisYear += interestPaidThisMonth;
             totalNetPaid += netMortgagePremiumThisMonth;
             totalNetInterestPaid += interestPaidThisMonth - taxBenefitsThisMonth;
+            totalNetInterestPaidThisYear += interestPaidThisMonth - taxBenefitsThisMonth;
             remainingDebt -= principalPaidThisMonth;
+            principalAmmortizedThisYear += principalPaidThisMonth;
             totalPeriodMonths++;
         }
         
         // extra amortizations once per year
         // note: potential early payment pennalties are not considered here
-        if (annualAmortization > 0 && remainingDebt > 0)
+        if (annualRepayment > 0 && remainingDebt > 0)
         {
-            double amountAmortized = MIN(annualAmortization, remainingDebt);
+            double amountAmortized = MIN(annualRepayment, remainingDebt);
             
-            NSLog(@" + annual amortization: €%.0f", amountAmortized);
+            NSLog(@" + extra annual repayment: €%.0f", amountAmortized);
             remainingDebt -= amountAmortized;
             totalPaid += amountAmortized;
             totalNetPaid += amountAmortized;
+            principalAmmortizedThisYear += amountAmortized;
+            
+            if (remainingDebt <= 1)
+            {
+                stillInDebt = NO;
+            }
+            
+#if ADJUST_PRINCIPAL_REPAYMENT_YEARLY
+            // adjust the monthly principal ammount to the new mortgate total (weird, but this is what Hypotrust seems to do!)
+            monthlyPayment = remainingDebt / (mortgagePeriodMonths);
+#endif
         }
+        
+        NSLog(@" * interest paid: €%.0f (with tax benefits: €%.0f)", totalInterestPaidThisYear, totalNetInterestPaidThisYear);
+        NSLog(@" * total tax benefits: €%.0f", totalInterestPaidThisYear - totalNetInterestPaidThisYear);
+        NSLog(@" * total ammortized: €%.0f", principalAmmortizedThisYear);
         
         // tax relief decreases by 0.5% per year and it's capped at 38% (for now, at least)
         if (maxDeductionRateCurrentYear > 0.38)
@@ -169,8 +220,8 @@ void calculateMortgage(MortgageType mortgageType)
         }
     }
     
-    NSLog(@"*******************************************************");
-    NSLog(@">>> Mortgage paid in full in %i year(s) and %i month(s)!", totalPeriodMonths / 12, totalPeriodMonths % 12);
+    NSLog(@"\n*******************************************************\n");
+    NSLog(@">>> Mortgage paid in full in %i year(s) and %i month(s)!\n", totalPeriodMonths / 12, totalPeriodMonths % 12);
 
     NSLog(@"Total net amount paid: €%.0f", totalNetPaid);
     NSLog(@"Total net interest paid: €%.0f", totalNetInterestPaid);
