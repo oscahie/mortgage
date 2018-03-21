@@ -35,7 +35,7 @@ int main(int argc, const char * argv[]) {
 
 #define EXPIRING_30_PERCENT_RULING          1
 #define ADJUST_LOAN_RISKCLASS               1
-#define ADJUST_PRINCIPAL_REPAYMENT_YEARLY   0
+#define ADJUST_PRINCIPAL_REPAYMENT_YEARLY   1
 
 void calculateMortgage(MortgageType mortgageType)
 {
@@ -49,10 +49,15 @@ void calculateMortgage(MortgageType mortgageType)
     double mortgageArrangementFee = 1250;   // the total amount paid as arrangement fees
     
     // dutch mortgage tax relief
-    double WOZValueOfProperty = 255000;     // the WOZ value of the property (in €)
     double maxDeductionRateCurrentYear = 0.505; // 51% in 2015, decreasing 0.5% per year until 2038, when it has reached 38%
     double incomeTaxBracket = 0.52;          // the highest taxation bracket applied to your salary (eg: 0.52 = 52%)
     int initialYear = 2016;
+
+    // the WOZ values of the property (in €) on January 1st, starting at the year before the purchase year
+    // years in the future for which the WOZ is not yet known will use the most recent available value
+    NSDictionary<NSNumber *, NSNumber*> *WOZPerYear = @{@(2015): @(270500),
+                                                        @(2016): @(285000),
+                                                        @(2017): @(382000)};
     
     /**************/
     
@@ -72,15 +77,9 @@ void calculateMortgage(MortgageType mortgageType)
         monthlyPayment = totalMortgageAmount * monthlyInterestRate / (1 - (pow(1/(1 + monthlyInterestRate), mortgagePeriodMonths)));
     }
     
-    // Deemed rental value (eigenwoningforfait)
-    // In 2015 it's 0.75% of WOZ value
-    double monthlyEWF = (WOZValueOfProperty * 0.0075) / 12;
-    
     NSLog(@">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>");
     NSLog(@">>> %@ Mortgage <<<", mortgageType == MortgageTypeAnnuitity ? @"Annuity" : @"Linear");
     NSLog(@"> Mortgage details: €%.0f at %.2f%% during %lu years", totalMortgageAmount, nominalInterestRate*100, (unsigned long)mortgagePeriodYears);
-    NSLog(@"> WOZ value: €%.0f", WOZValueOfProperty);
-    NSLog(@"> Eigenwoningforfait: €%.2f/month", monthlyEWF);
     NSLog(@"> Additional annual repayment: €%.0f", annualRepayment);
     
     double totalPaid = 0;
@@ -88,11 +87,16 @@ void calculateMortgage(MortgageType mortgageType)
     double totalNetPaid = 0; // with tax relief
     double totalNetInterestPaid = 0;
     int totalPeriodMonths = 0;
+    int yearCount = 0;
     BOOL stillInDebt = YES;
+    
+    // The applicable WOZ value for a given year is the value on 1st of January of the previous year
+    double applicableWOZValue = WOZPerYear[@(initialYear - 1)].doubleValue;
+    NSCAssert(applicableWOZValue > 0, @"WOZ value not available for the first year");
     
     for (int year = initialYear; year <= initialYear + mortgagePeriodYears && stillInDebt; year++)
     {
-        NSLog(@"\n*********** Year %d (#%d) - Remaining debt: €%.0f ***********", year, 1 + totalPeriodMonths / 12, remainingDebt);
+        NSLog(@"\n*********** Year %d (#%d) - Remaining debt: €%.0f ***********", year, yearCount + 1, remainingDebt);
         
 #if EXPIRING_30_PERCENT_RULING
         /* custom code to deal with the 30% ruling expiring in 2018, after which the income tax bracket becomes 52% instead of 42% */
@@ -110,7 +114,7 @@ void calculateMortgage(MortgageType mortgageType)
         /* adjust the loan's risk class from initial 85% to 65% on the third year, thanks to downpayments and revalorization of the property */
         if (year >= 2018)
         {
-            nominalInterestRate = 0.0187; // Hypotrust Comfort (standaard), 10 years, t/m 65%, 1.87% as of dec 2017
+            nominalInterestRate = 0.0214; // Hypotrust Comfort (standaard), 10 years, t/m 65%, 1.87% in december 2015
             monthlyInterestRate = nominalInterestRate / 12;
         }
 #endif
@@ -118,6 +122,17 @@ void calculateMortgage(MortgageType mortgageType)
         double totalInterestPaidThisYear = 0;
         double totalNetInterestPaidThisYear = 0;
         double principalAmmortizedThisYear = 0;
+        
+        // if we have a WOZ value for the previous year then use it, otherwise reuse the last known value from a previous iteration
+        if (WOZPerYear[@(year - 1)])
+        {
+            applicableWOZValue = WOZPerYear[@(year - 1)].doubleValue;
+        }
+        
+        // Deemed rental value (eigenwoningforfait)
+        // In 2016 and 2017 it was 0.75% of WOZ value
+        // In 2018 it was 0.70%
+        double monthlyEWF =  (applicableWOZValue * (year < 2018 ? 0.0075 : 0.007)) / 12;
         
         for (int month = 1; month <= 12 && stillInDebt; month++)
         {
@@ -218,6 +233,8 @@ void calculateMortgage(MortgageType mortgageType)
         {
             maxDeductionRateCurrentYear -= 0.005;
         }
+        
+        yearCount++;
     }
     
     NSLog(@"\n*******************************************************\n");
